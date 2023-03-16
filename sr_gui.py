@@ -5,18 +5,19 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5 import uic
 
+import debugpy
 import ffmpeg
 import cv2
 import glob
 import mimetypes
 import numpy as np
 import os
+import os.path as osp
 import shutil
 import torch
 from torchvision.transforms import ToPILImage, FiveCrop, Pad, Resize, InterpolationMode
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from basicsr.utils.download_util import load_file_from_url
-from os import path as osp
 from easydict import EasyDict
 
 from realesrgan import RealESRGANer
@@ -63,18 +64,18 @@ class ProgressDialog(QDialog, form_class_pbar):
         self.pbar.setValue(val)
 
     def fnc_stop_progress(self):
-        self.close()
         self.stop = True
         self.stop_signal.emit(0)
+        self.close()
 
     def fnc_open_savedir(self):
         os.startfile(self.output_path)
 
     def closeEvent(self, e):
-        sys.exit()
-        # self.close()
-        # self.stop = True
-        # self.stop_signal.emit(0)
+        # sys.exit()
+        self.stop = True
+        self.stop_signal.emit(0)
+        self.close()
 
 
 class MainWindow(QMainWindow, QWidget, form_class):
@@ -94,6 +95,8 @@ class MainWindow(QMainWindow, QWidget, form_class):
         # self.output_dir_path = ""
         self.pdialog = ProgressDialog()
         self.pdialog.stop_signal.connect(self.fnc_add_progress)
+        self.input_file_path = "C:/Users/ZZY/Desktop/0_cityeyelab/code/Super_Resolution_GUI/inputs/video/project7_resize0.25.mp4"
+        self.output_dir_path = "C:/Users/ZZY/Desktop/0_cityeyelab/code/Super_Resolution_GUI/outputs"
 
     def fnc_select_input(self):
         self.input_file_path, _ = QFileDialog.getOpenFileName(self, 'Please select input file')
@@ -136,8 +139,8 @@ class MainWindow(QMainWindow, QWidget, form_class):
         progress_step = int(pbar / self.max_length * 100)
         # print(progress_step)
         self.pdialog.progress(progress_step)
-        if progress_step >= 100 or self.pdialog.stop:
-            self.close_pdialog(f"Complete!!\n>> {self.th.output_name1}\n>>{self.th.output_name2}")
+        if progress_step >= 100:
+            self.close_pdialog(f"Complete!!\n>> {self.th.output_name1}\n>> {self.th.output_name2}")
             self.pdialog.output_path = resource_path(self.output_dir_path)
             self.pdialog.btn_open_savedir.setEnabled(True)
             # self.pdialog.btn_cancel.setEnabled(True)
@@ -146,7 +149,7 @@ class MainWindow(QMainWindow, QWidget, form_class):
             self.close_pdialog("Aborted!!")
 
     def close_pdialog(self, pdialog_text: str):
-        self.th.working = False
+        self.th.stop()
         self.pdialog.text2 = pdialog_text
         self.pdialog.label_file_name.setText(self.pdialog.text1 + self.pdialog.text2)
         if pdialog_text.startswith("Complete"):
@@ -162,7 +165,6 @@ class MainWindow(QMainWindow, QWidget, form_class):
 
 class Inference(QThread):
     progress_signal = pyqtSignal(int)
-
     def __init__(self, input_path, output_path, upscale_factor, tile_size):
         super().__init__()
         self.input_path = input_path
@@ -171,7 +173,6 @@ class Inference(QThread):
         self.tile_size = tile_size
 
         self.working = True
-        # print("thread1")
 
         INPUT_PATH      = resource_path(self.input_path)
         OUTPUT_PATH     = resource_path(self.output_path)
@@ -304,10 +305,6 @@ class Inference(QThread):
         # self.step = 1
 
     def run(self):
-        # while self.working:
-        #     self.progress_signal.emit(self.step)
-        #     self.msleep(1)
-        #     self.step += 1
         while self.working:
             hasFrame, frame_org = self.cap_org.read()
             img = self.reader.get_frame()
@@ -350,7 +347,12 @@ class Inference(QThread):
             torch.cuda.synchronize(self.device)
             self.pbar += 1
             self.progress_signal.emit(self.pbar)
+    
 
+    def stop(self):
+        self.working = False
+        self.quit()
+        self.wait(3000)
         # if self.cap_org.isOpened():
         #     self.video_writer.release()
         #     self.cap_org.release()
@@ -380,7 +382,6 @@ def get_video_meta_info(video_path):
 
 
 class Reader:
-
     def __init__(self, args, total_workers=1, worker_idx=0):
         self.args = args
         input_type = mimetypes.guess_type(args.input)[0]
@@ -390,10 +391,10 @@ class Reader:
         self.input_fps = None
         if self.input_type.startswith('video'):
             video_path = args.input
-            self.stream_reader = (
-                ffmpeg.input(video_path).output('pipe:', format='rawvideo', pix_fmt='bgr24',
-                                                loglevel='error').run_async(
-                                                    pipe_stdin=True, pipe_stdout=True, cmd=args.ffmpeg_bin))
+            ffmpeg1 = ffmpeg.input(video_path)
+            ffmpeg2 = ffmpeg1.output('pipe:', format='rawvideo', pix_fmt='bgr24', loglevel='error')
+            ffmpeg3 = ffmpeg2.run_async(pipe_stdin=True, pipe_stdout=True, cmd=args.ffmpeg_bin)
+            self.stream_reader = (ffmpeg3)
             meta = get_video_meta_info(video_path)
             self.width = meta['width']
             self.height = meta['height']
